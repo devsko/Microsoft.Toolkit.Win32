@@ -6,38 +6,31 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using Microsoft.Toolkit.Win32.UI.XamlHost;
-using Windows.UI.Xaml;
+using WUX = Windows.UI.Xaml;
 
 namespace Microsoft.Toolkit.Wpf.UI.XamlHost
 {
     /// <summary>
     /// WindowsXamlHost control hosts UWP XAML content inside the Windows Presentation Foundation
     /// </summary>
-    public abstract partial class WindowsXamlHostBase : HwndHost
+    abstract partial class WindowsXamlHostBase : HwndHost
     {
         /// <summary>
         /// UWP XAML Application instance and root UWP XamlMetadataProvider.  Custom implementation required to
         /// probe at runtime for custom UWP XAML type information.  This must be created before
         /// creating any DesktopWindowXamlSource instances if custom UWP XAML types are required.
         /// </summary>
-        private readonly Windows.UI.Xaml.Application _application;
+        private readonly WUX.Application _application;
 
         /// <summary>
         /// UWP XAML DesktopWindowXamlSource instance that hosts XAML content in a win32 application
         /// </summary>
-        private readonly Windows.UI.Xaml.Hosting.DesktopWindowXamlSource _xamlSource;
-
-        /// <summary>
-        /// A reference count on the UWP XAML framework is tied to WindowsXamlManager's
-        /// lifetime.  UWP XAML is spun up on the first WindowsXamlManager creation and
-        /// deinitialized when the last instance of WindowsXamlManager is destroyed.
-        /// </summary>
-        private readonly Windows.UI.Xaml.Hosting.WindowsXamlManager _windowsXamlManager;
+        private readonly WUX.Hosting.DesktopWindowXamlSource _xamlSource;
 
         /// <summary>
         /// Private field that backs ChildInternal property.
         /// </summary>
-        private UIElement _childInternal;
+        private WUX.UIElement _childInternal;
 
         /// <summary>
         ///     Fired when WindowsXamlHost root UWP XAML content has been updated
@@ -58,18 +51,10 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
             // Instantiation of the application object must occur before creating the DesktopWindowXamlSource instance.
             // If no Application object is created before DesktopWindowXamlSource is created, DestkopWindowXamlSource
             // will create a generic Application object unable to load custom UWP XAML metadata.
-            Microsoft.Toolkit.Win32.UI.XamlHost.XamlApplication.GetOrCreateXamlApplicationInstance(ref _application);
-
-            // Create an instance of the WindowsXamlManager. This initializes and holds a
-            // reference on the UWP XAML DXamlCore and must be explicitly created before
-            // any UWP XAML types are programmatically created.  If WindowsXamlManager has
-            // not been created before creating DesktopWindowXamlSource, DesktopWindowXaml source
-            // will create an instance of WindowsXamlManager internally.  (Creation is explicit
-            // here to illustrate how to initialize UWP XAML before initializing the DesktopWindowXamlSource.)
-            _windowsXamlManager = Windows.UI.Xaml.Hosting.WindowsXamlManager.InitializeForCurrentThread();
+            XamlApplication.GetOrCreateXamlApplicationInstance(ref _application);
 
             // Create DesktopWindowXamlSource, host for UWP XAML content
-            _xamlSource = new Windows.UI.Xaml.Hosting.DesktopWindowXamlSource();
+            _xamlSource = new WUX.Hosting.DesktopWindowXamlSource();
 
             // Hook DesktopWindowXamlSource OnTakeFocus event for Focus processing
             _xamlSource.TakeFocusRequested += OnTakeFocusRequested;
@@ -137,7 +122,7 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
         /// </summary>
         /// <value>The <see cref="Windows.UI.Xaml.UIElement"/> child.</value>
         /// <remarks>This UWP XAML element is the root element of the wrapped <see cref="Windows.UI.Xaml.Hosting.DesktopWindowXamlSource" />.</remarks>
-        protected Windows.UI.Xaml.UIElement ChildInternal
+        protected WUX.UIElement ChildInternal
         {
             get
             {
@@ -151,7 +136,7 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
                     return;
                 }
 
-                var currentRoot = (Windows.UI.Xaml.FrameworkElement)ChildInternal;
+                var currentRoot = (WUX.FrameworkElement)ChildInternal;
                 if (currentRoot != null)
                 {
                     currentRoot.SizeChanged -= XamlContentSizeChanged;
@@ -160,15 +145,16 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
                 _childInternal = value;
                 SetContent();
 
-                var frameworkElement = ChildInternal as Windows.UI.Xaml.FrameworkElement;
+                var frameworkElement = ChildInternal as WUX.FrameworkElement;
                 if (frameworkElement != null)
                 {
                     // If XAML content has changed, check XAML size
                     // to determine if WindowsXamlHost needs to re-run layout.
                     frameworkElement.SizeChanged += XamlContentSizeChanged;
 
+                    // This was causing many tests to fail in catgates due to output file missmatch.
                     // WindowsXamlHost DataContext should flow through to UWP XAML content
-                    frameworkElement.DataContext = DataContext;
+                    // frameworkElement.DataContext = DataContext;
                 }
 
                 // Fire updated event
@@ -186,9 +172,9 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
         }
 
         /// <summary>
-        /// Gets or sets a value indicating whether this wrapper control instance been disposed
+        /// Gets a value indicating whether this wrapper control instance been disposed
         /// </summary>
-        protected bool IsDisposed { get; set; }
+        public bool IsDisposed { get; private set; }
 
         /// <summary>
         /// Creates <see cref="Windows.UI.Xaml.Application" /> object, wrapped <see cref="Windows.UI.Xaml.Hosting.DesktopWindowXamlSource" /> instance; creates and
@@ -198,11 +184,13 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
         /// <returns>Handle to XAML window</returns>
         protected override HandleRef BuildWindowCore(HandleRef hwndParent)
         {
+            ComponentDispatcher.ThreadFilterMessage += this.OnThreadFilterMessage;
+
             // 'EnableMouseInPointer' is called by the WindowsXamlManager during initialization. No need
             // to call it directly here.
 
             // Create DesktopWindowXamlSource instance
-            var desktopWindowXamlSourceNative = _xamlSource.GetInterop();
+            var desktopWindowXamlSourceNative = _xamlSource.GetInterop<IDesktopWindowXamlSourceNative>();
 
             // Associate the window where UWP XAML will display content
             desktopWindowXamlSourceNative.AttachToWindow(hwndParent.Handle);
@@ -241,21 +229,47 @@ namespace Microsoft.Toolkit.Wpf.UI.XamlHost
         /// <param name="disposing">Is disposing?</param>
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && !this.IsDisposed)
             {
-                ChildInternal = null;
+                // Free any other managed objects here.
+                ComponentDispatcher.ThreadFilterMessage -= this.OnThreadFilterMessage;
 
-                // Required by CA2213: _xamlSource?.Dispose() is insufficient.
+                ChildInternal = null;
                 if (_xamlSource != null)
                 {
                     _xamlSource.TakeFocusRequested -= OnTakeFocusRequested;
-                    _xamlSource.Dispose();
                 }
+            }
+
+            // Free any unmanaged objects here.
+            if (_xamlSource != null && !this.IsDisposed)
+            {
+                _xamlSource.Dispose();
             }
 
             // BUGBUG: CoreInputSink cleanup is failing when explicitly disposing
             // WindowsXamlManager.  Add dispose call back when that bug is fixed in 19h1.
+            this.IsDisposed = true;
+
+            // Call base class implementation.
             base.Dispose(disposing);
+        }
+
+        protected override System.IntPtr WndProc(System.IntPtr hwnd, int msg, System.IntPtr wParam, System.IntPtr lParam, ref bool handled)
+        {
+            const int WM_GETOBJECT = 0x003D;
+            switch (msg)
+            {
+                // We don't want HwndHost to handle the WM_GETOBJECT.
+                // Instead we want to let the HwndIslandSite's WndProc get it
+                // So return handled = false and don't let the base class do
+                // anything on that message.
+                case WM_GETOBJECT:
+                    handled = false;
+                    return System.IntPtr.Zero;
+            }
+
+            return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
         }
     }
 }
